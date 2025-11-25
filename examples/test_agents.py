@@ -2,7 +2,7 @@
 
 import json
 from app.models import GenerateRequest
-from app.agents.generator_new import NotebookGenerator
+from app.agents.generator import NotebookGenerator
 from app.utils.notebook_exporter import export_for_testing, mock_test_execution
 
 

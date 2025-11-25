@@ -6,7 +6,7 @@ from app.models import (
     GenerateRequest, ModifyRequest, FixRequest,
     NotebookStructure, SessionState
 )
-from app.agents.generator_new import NotebookGenerator
+from app.agents.generator import NotebookGenerator
 from app.agents.modifier import NotebookModifier
 from app.agents.fixer import NotebookFixer, NotebookValidator
 from app.memory import session_memory
