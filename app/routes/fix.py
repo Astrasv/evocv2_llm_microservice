@@ -1,39 +1,39 @@
-"""Fix endpoint for repairing broken notebooks."""
+"""Fix endpoint for repairing broken notebooks - stateless with Mem0."""
 
 from fastapi import APIRouter, HTTPException, status
-from datetime import datetime
 import logging
 
 from app.models import FixRequest, FixResponse
 from app.graph import workflow, WorkflowState
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/v1/sessions", tags=["fix"])
-
-# Shared session store
-sessions = {}
+router = APIRouter(prefix="/v1", tags=["fix"])
 
 
-def set_sessions_store(store):
-    """Set the global sessions store."""
-    global sessions
-    sessions = store
-
-
-@router.post("/{session_id}/fix", response_model=FixResponse)
-async def fix_notebook(session_id: str, request: FixRequest):
+@router.post("/fix", response_model=FixResponse)
+async def fix_notebook(request: FixRequest):
     """
     Fix a broken notebook based on error traceback.
 
-    Uses intelligent error analysis and validation loops to ensure fixes work.
+    Stateless operation - client sends broken notebook and receives fixed version.
+
+    Features:
+    - Intelligent error analysis using LLM
+    - Mem0-enhanced with user's common error patterns
+    - Retry loop with validation (up to 3 attempts)
+    - Stores successful fix patterns for future learning
+
+    Always uses full notebook context for comprehensive error fixing.
     """
     try:
-        logger.info(f"Received fix request for session {session_id}")
+        logger.info(f"Received fix request for notebook {request.notebook_id}")
+        logger.info(f"User: {request.user_id}")
 
         # Execute workflow with retry loop
         state: WorkflowState = {
             "operation": "fix",
-            "session_id": session_id,
+            "user_id": request.user_id,
+            "notebook_id": request.notebook_id,
             "request": request,
             "notebook": None,
             "changes_made": [],
@@ -45,27 +45,16 @@ async def fix_notebook(session_id: str, request: FixRequest):
 
         final_state = workflow.execute(state)
 
-        notebook = final_state.get("notebook") or request.current_notebook
+        notebook = final_state.get("notebook") or request.notebook
         fixes = final_state.get("changes_made", [])
         validation_passed = final_state.get("validation_passed", False)
 
-        # Update session if exists
-        if session_id in sessions:
-            sessions[session_id].notebook = notebook
-            sessions[session_id].history.append({
-                "operation": "fix",
-                "timestamp": datetime.utcnow().isoformat(),
-                "fixes": fixes,
-                "success": validation_passed
-            })
-            sessions[session_id].updated_at = datetime.utcnow().isoformat()
-
         message = "Notebook fixed successfully" if validation_passed else "Fixes applied but validation incomplete"
 
-        logger.info(f"Fix completed for session {session_id}: {message}")
+        logger.info(f"Fix completed for notebook {request.notebook_id}: {message}")
 
         return FixResponse(
-            session_id=session_id,
+            notebook_id=request.notebook_id,
             notebook=notebook,
             fixes_applied=fixes,
             validation_passed=validation_passed,

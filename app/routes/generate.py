@@ -1,23 +1,13 @@
-"""Generate endpoint for creating new DEAP notebooks."""
+"""Generate endpoint for creating new DEAP notebooks - stateless with Mem0."""
 
 from fastapi import APIRouter, HTTPException, status
-from datetime import datetime
 import logging
 
-from app.models import GenerateRequest, GenerateResponse, SessionState
+from app.models import GenerateRequest, GenerateResponse
 from app.graph import workflow, WorkflowState
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1", tags=["generate"])
-
-# Shared session store (imported from main)
-sessions = {}
-
-
-def set_sessions_store(store):
-    """Set the global sessions store."""
-    global sessions
-    sessions = store
 
 
 @router.post("/generate", response_model=GenerateResponse)
@@ -25,16 +15,17 @@ async def generate_notebook(request: GenerateRequest):
     """
     Generate a new 12-cell DEAP notebook from specification.
 
-    Creates a complete, functional DEAP evolutionary algorithm notebook
-    following the strict 12-cell structure.
+    Stateless operation - client receives notebook and must manage it.
+    User preferences and patterns are stored in Mem0 for personalization.
     """
     try:
-        logger.info(f"Received generate request for session {request.session_id}")
+        logger.info(f"Received generate request for user {request.user_id}")
 
         # Execute workflow
         state: WorkflowState = {
             "operation": "generate",
-            "session_id": request.session_id,
+            "user_id": request.user_id,
+            "notebook_id": request.notebook_id,
             "request": request,
             "notebook": None,
             "changes_made": [],
@@ -54,28 +45,10 @@ async def generate_notebook(request: GenerateRequest):
 
         notebook = final_state["notebook"]
 
-        # Store session
-        session = SessionState(
-            session_id=request.session_id,
-            notebook=notebook,
-            problem=request.problem,
-            algorithm=request.algorithm,
-            operators=request.operators,
-            features=request.features,
-            history=[{
-                "operation": "generate",
-                "timestamp": datetime.utcnow().isoformat(),
-                "changes": final_state.get("changes_made", [])
-            }],
-            created_at=datetime.utcnow().isoformat(),
-            updated_at=datetime.utcnow().isoformat()
-        )
-        sessions[request.session_id] = session
-
-        logger.info(f"Successfully generated notebook for session {request.session_id}")
+        logger.info(f"Successfully generated notebook {request.notebook_id} for user {request.user_id}")
 
         return GenerateResponse(
-            session_id=request.session_id,
+            notebook_id=request.notebook_id,
             notebook=notebook,
             message="Notebook generated successfully"
         )

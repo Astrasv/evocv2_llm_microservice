@@ -1,45 +1,46 @@
-"""Modify endpoint for updating existing notebooks."""
+"""Modify endpoint for updating existing notebooks - stateless with Mem0."""
 
 from fastapi import APIRouter, HTTPException, status
-from datetime import datetime
 import logging
 
 from app.models import ModifyRequest, ModifyResponse
 from app.graph import workflow, WorkflowState
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/v1/sessions", tags=["modify"])
-
-# Shared session store
-sessions = {}
+router = APIRouter(prefix="/v1", tags=["modify"])
 
 
-def set_sessions_store(store):
-    """Set the global sessions store."""
-    global sessions
-    sessions = store
-
-
-@router.post("/{session_id}/modify", response_model=ModifyResponse)
-async def modify_notebook(session_id: str, request: ModifyRequest):
+@router.post("/modify", response_model=ModifyResponse)
+async def modify_notebook(request: ModifyRequest):
     """
     Modify an existing notebook using natural language instructions.
 
-    Supports intelligent dependency detection and cascading updates.
-    Optionally specify cell_type to target specific cells for modification.
+    Stateless operation - client sends full notebook and receives modified version.
+
+    Supports two modification modes:
+    1. Targeted cell modification: Specify cell_name (e.g., 'mutate', 'crossover')
+       - Uses minimal context (70-85% token savings)
+       - Dynamic dependency detection via LLM
+       - Mem0 provides user preferences and learned patterns
+
+    2. Notebook-level modification: No cell_name specified
+       - Uses full notebook context
+       - For complex/generic changes
+       - Mem0 enhances with user patterns
     """
     try:
-        logger.info(f"Received modify request for session {session_id}")
-        if request.cell_type:
-            logger.info(f"Targeting cell_type: {request.cell_type}")
+        logger.info(f"Received modify request for notebook {request.notebook_id}")
+        logger.info(f"User: {request.user_id}, Cell: {request.cell_name or 'notebook-level'}")
 
         # Execute workflow
         state: WorkflowState = {
             "operation": "modify",
-            "session_id": session_id,
+            "user_id": request.user_id,
+            "notebook_id": request.notebook_id,
             "request": request,
             "notebook": None,
             "changes_made": [],
+            "cells_modified": [],
             "validation_passed": False,
             "error": None,
             "retry_count": 0,
@@ -56,25 +57,16 @@ async def modify_notebook(session_id: str, request: ModifyRequest):
 
         notebook = final_state["notebook"]
         changes = final_state.get("changes_made", [])
+        cells_modified = final_state.get("cells_modified", [])
 
-        # Update session if exists
-        if session_id in sessions:
-            sessions[session_id].notebook = notebook
-            sessions[session_id].history.append({
-                "operation": "modify",
-                "instruction": request.instruction,
-                "cell_type": request.cell_type,
-                "timestamp": datetime.utcnow().isoformat(),
-                "changes": changes
-            })
-            sessions[session_id].updated_at = datetime.utcnow().isoformat()
-
-        logger.info(f"Successfully modified notebook for session {session_id}")
+        logger.info(f"Successfully modified notebook {request.notebook_id}")
+        logger.info(f"Modified cells: {cells_modified}")
 
         return ModifyResponse(
-            session_id=session_id,
+            notebook_id=request.notebook_id,
             notebook=notebook,
             changes_made=changes,
+            cells_modified=cells_modified,
             message="Notebook modified successfully"
         )
 

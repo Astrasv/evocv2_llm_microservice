@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     groq_api_key: str
     model_name: str = "openai/gpt-oss-120b"
     mem0_api_key: Optional[str] = None
+    mem0_org_id: Optional[str] = None
+    mem0_project_id: Optional[str] = None
 
     host: str = "0.0.0.0"
     port: int = 8000

@@ -3,7 +3,6 @@
 **Python service for generating and maintaining purely functional DEAP evolutionary algorithm code in currently rigid 12-cell Jupyter notebook format.**
 
 
-TODO: Sessions Bug fixes
 ## Overview
 
 EVOC DEAP Agent is an intelligent service that creates, modifies, and fixes DEAP code following a strict functional programming style with exactly 12 cells, perfect for Jupyter notebooks.
@@ -132,7 +131,7 @@ Every generated notebook follows this exact structure:
 
    Or directly:
    ```bash
-   python -m app.main_new
+   python -m app.main
    ```
 
 6. **Access the API:**

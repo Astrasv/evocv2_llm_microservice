@@ -76,8 +76,9 @@ class GenerateRequest(BaseModel):
     """Request to generate a new DEAP notebook - flexible structure."""
     model_config = {"extra": "allow"}  # Allow any additional fields
 
-    # Required fields
-    session_id: str = Field(..., description="Unique session identifier")
+    # Required identifiers
+    user_id: str = Field(..., description="Unique user identifier (Mem0 user_id)")
+    notebook_id: str = Field(..., description="Unique notebook identifier (Mem0 run_id)")
 
     # Flexible fields that might come in various formats
     problemName: Optional[str] = None
@@ -127,50 +128,44 @@ class GenerateRequest(BaseModel):
 
 class ModifyRequest(BaseModel):
     """Request to modify an existing notebook."""
+    user_id: str = Field(..., description="Unique user identifier (Mem0 user_id)")
+    notebook_id: str = Field(..., description="Notebook identifier (Mem0 run_id)")
+
     instruction: str = Field(..., description="Natural language instruction for modification")
-    current_notebook: NotebookStructure
-    cell_type: Optional[str] = Field(None, description="Specific cell type to modify (e.g., 'mutation', 'crossover', 'imports')")
+    notebook: NotebookStructure = Field(..., description="Current notebook to modify")
+    cell_name: Optional[str] = Field(None, description="Specific cell to modify (e.g., 'mutate', 'crossover'). If None, notebook-level change.")
     preferences: Dict[str, Any] = Field(default_factory=dict)
 
 
 class FixRequest(BaseModel):
     """Request to fix a broken notebook."""
+    user_id: str = Field(..., description="Unique user identifier (Mem0 user_id)")
+    notebook_id: str = Field(..., description="Notebook identifier (Mem0 run_id)")
+
     traceback: str = Field(..., description="Error traceback from execution")
-    current_notebook: NotebookStructure
+    notebook: NotebookStructure = Field(..., description="Current notebook with errors")
     context: Optional[str] = Field(None, description="Additional context about the error")
-
-
-class SessionState(BaseModel):
-    """Complete session state."""
-    session_id: str
-    notebook: NotebookStructure
-    problem: Optional[ProblemConfig] = None
-    algorithm: Optional[AlgorithmConfig] = None
-    operators: Optional[OperatorConfig] = None
-    features: Optional[Features] = None
-    history: List[Dict[str, Any]] = Field(default_factory=list)
-    created_at: str
-    updated_at: str
 
 
 class GenerateResponse(BaseModel):
     """Response from generate endpoint."""
-    session_id: str
+    notebook_id: str = Field(..., description="Notebook ID (same as request)")
     notebook: NotebookStructure
     message: str = "Notebook generated successfully"
 
 
 class ModifyResponse(BaseModel):
     """Response from modify endpoint."""
-    session_id: str
+    notebook_id: str
     notebook: NotebookStructure
     changes_made: List[str] = Field(description="List of changes applied")
+    cells_modified: List[int] = Field(description="Indices of modified cells")
     message: str = "Notebook modified successfully"
 
 
 class FixResponse(BaseModel):
     """Response from fix endpoint."""
-    session_id: str
+    notebook_id: str
     notebook: NotebookStructure
     fixes_applied: List[str] = Field(description="List of fixes applied")
     validation_passed: bool
@@ -181,4 +176,4 @@ class ErrorResponse(BaseModel):
     """Error response."""
     error: str
     detail: Optional[str] = None
-    session_id: Optional[str] = None
+    notebook_id: Optional[str] = None

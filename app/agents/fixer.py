@@ -1,4 +1,4 @@
-"""Fixer agent - Fixes broken notebooks based on tracebacks."""
+"""Fixer agent - Fixes broken notebooks based on tracebacks with Mem0 integration."""
 
 import instructor
 from groq import Groq
@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from app.config import settings
 from app.models import FixRequest, NotebookStructure, NotebookCell
+from app.memory import enhanced_memory
 from app.utils import validate_notebook_structure, format_code
 import re
 import logging
@@ -36,7 +37,7 @@ class FixPlan(BaseModel):
 
 
 class NotebookFixer:
-    """Fixes broken DEAP notebooks based on error tracebacks."""
+    """Fixes broken DEAP notebooks based on error tracebacks with Mem0 learning."""
 
     def __init__(self):
         self.client = instructor.from_groq(
@@ -49,18 +50,18 @@ class NotebookFixer:
         request: FixRequest,
         max_retries: int = 3
     ) -> tuple[NotebookStructure, List[str], bool]:
-        """Fix notebook with retry loop."""
-        logger.info("Fixing notebook based on traceback")
+        """Fix notebook with retry loop and Mem0 error pattern learning."""
+        logger.info(f"Fixing notebook {request.notebook_id} for user {request.user_id}")
 
-        current_notebook = request.current_notebook
+        current_notebook = request.notebook
         attempts = 0
 
         while attempts < max_retries:
             attempts += 1
             logger.info(f"Fix attempt {attempts}/{max_retries}")
 
-            # Analyze error and create fix plan
-            plan = self._analyze_error(request, current_notebook)
+            # Analyze error with Mem0 context
+            plan = self._analyze_error_with_mem0(request, current_notebook)
 
             # Apply fixes
             fixed_notebook = self._apply_fixes(current_notebook, plan)
@@ -70,214 +71,265 @@ class NotebookFixer:
 
             if is_valid:
                 fixes_applied = [f.fix_description for f in plan.fixes]
+
+                # Store successful fix pattern in Mem0
+                self._store_fix_pattern_in_mem0(request, plan, success=True)
+
                 return fixed_notebook, fixes_applied, True
 
             # Update request for retry
             logger.warning(f"Validation failed: {errors}")
             request = FixRequest(
+                user_id=request.user_id,
+                notebook_id=request.notebook_id,
                 traceback=f"Validation errors: {'; '.join(errors)}",
-                current_notebook=fixed_notebook,
+                notebook=fixed_notebook,
                 context=request.context
             )
             current_notebook = fixed_notebook
 
-        # Max retries reached
-        logger.error("Failed to fix notebook after max retries")
-        fixes_applied = [f"Attempted {attempts} fixes but validation failed"]
+        # Max retries exceeded
+        logger.error("Max retries exceeded, returning partially fixed notebook")
+        fixes_applied = [f.fix_description for f in plan.fixes] if 'plan' in locals() else []
+
+        # Store failed fix attempt in Mem0 for learning
+        if 'plan' in locals():
+            self._store_fix_pattern_in_mem0(request, plan, success=False)
+
         return current_notebook, fixes_applied, False
 
-    def _analyze_error(
+    def _analyze_error_with_mem0(
         self,
         request: FixRequest,
         notebook: NotebookStructure
     ) -> FixPlan:
-        """Analyze error traceback and create fix plan."""
-        # Extract cell index from traceback if possible
-        error_cell = self._extract_error_cell(request.traceback)
+        """Analyze error using LLM with Mem0 context."""
+        # Get Mem0 context for similar errors
+        mem0_context = self._get_mem0_error_context(request.user_id, request.traceback)
 
-        notebook_code = self._notebook_to_code(notebook)
+        # Summarize notebook
+        notebook_summary = self._summarize_notebook(notebook)
 
-        prompt = f"""You are an expert at fixing DEAP evolutionary algorithm code.
+        # Extract error details from traceback
+        error_details = self._extract_error_details(request.traceback)
+
+        # Build context string
+        context_str = self._format_mem0_error_context(mem0_context)
+
+        prompt = f"""Analyze and fix this DEAP notebook error.
 
 Error traceback:
 {request.traceback}
 
-{f'Additional context: {request.context}' if request.context else ''}
+{context_str}
 
-Current notebook code (12 cells):
-{notebook_code}
+Current notebook structure (12 cells):
+{notebook_summary}
 
-Analyze the error and create a fix plan. The notebook MUST maintain exactly 12 cells:
-- Cell 0: imports
-- Cell 1: problem config/bounds
-- Cell 2: creator.create (FitnessMin/Max, Individual)
-- Cell 3: evaluate function (def evaluate)
-- Cell 4: mate function (def mate)
-- Cell 5: mutate function (def mutate)
-- Cell 6: select function (def select)
-- Cell 7: additional operators
-- Cell 8: initialization (def create_individual)
-- Cell 9: toolbox.register() calls (MUST be after all function definitions)
-- Cell 10: main evolution loop
-- Cell 11: results/plotting
+Additional context: {request.context or 'None'}
 
-Common DEAP issues:
-1. toolbox.register() called before functions are defined → move to cell 9
-2. Using class Individual instead of creator.Individual
-3. Missing return statement in operators (must return tuple for mutate)
-4. Undefined variables/functions
-5. Wrong fitness weights
+Common DEAP notebook errors:
+1. toolbox.register() called before function definitions
+2. Missing return tuple comma in evaluate/mutate functions
+3. Incorrect creator.create() usage
+4. Variables used before definition
+5. Missing imports
 
-Provide specific fixes for each affected cell."""
+Analyze the error and provide a fix plan.
+Return structured fixes for the affected cells.
+"""
 
         try:
             plan = self.client.chat.completions.create(
                 model=settings.model_name,
                 messages=[{"role": "user", "content": prompt}],
                 response_model=FixPlan,
-                max_tokens=3000,
+                max_tokens=2500,
                 temperature=0.2
             )
             return plan
         except Exception as e:
             logger.error(f"Failed to analyze error: {e}")
-            return self._fallback_fix_plan(request, error_cell)
+            # Fallback to heuristic-based fix
+            return self._fallback_fix(request, notebook)
 
-    def _extract_error_cell(self, traceback: str) -> Optional[int]:
-        """Extract cell index from traceback."""
-        # Look for patterns like "in <cell line: 5>" or "Cell In[5]"
-        patterns = [
-            r'in <cell line:\s*(\d+)>',
-            r'Cell In\[(\d+)\]',
-            r'<ipython-input-(\d+)',
+    def _get_mem0_error_context(self, user_id: str, traceback: str) -> Dict[str, Any]:
+        """Get Mem0 context for similar past errors."""
+        context = {
+            "common_errors": [],
+            "past_fixes": []
+        }
+
+        try:
+            # Get user's common error patterns
+            common = enhanced_memory.get_common_errors(
+                user_id=user_id,
+                limit=5
+            )
+            context["common_errors"] = [
+                e.get("memory", e.get("content", ""))
+                for e in common
+            ]
+
+            # Search for similar errors
+            error_type = self._extract_error_type(traceback)
+            if error_type:
+                similar = enhanced_memory.search_user_context(
+                    user_id=user_id,
+                    query=f"fix for {error_type} error",
+                    limit=3
+                )
+                context["past_fixes"] = [
+                    s.get("memory", s.get("content", ""))
+                    for s in similar
+                ]
+
+        except Exception as e:
+            logger.error(f"Error getting Mem0 error context: {e}")
+
+        return context
+
+    def _format_mem0_error_context(self, context: Dict[str, Any]) -> str:
+        """Format Mem0 error context for prompt."""
+        parts = []
+
+        if context.get("common_errors"):
+            parts.append("User's common errors:\n- " + "\n- ".join(context["common_errors"][:3]))
+
+        if context.get("past_fixes"):
+            parts.append("Similar past fixes:\n- " + "\n- ".join(context["past_fixes"][:2]))
+
+        return "\n\n".join(parts) if parts else ""
+
+    def _extract_error_type(self, traceback: str) -> Optional[str]:
+        """Extract error type from traceback."""
+        match = re.search(r'(\w+Error):', traceback)
+        return match.group(1) if match else None
+
+    def _extract_error_details(self, traceback: str) -> Dict[str, Any]:
+        """Extract structured details from traceback."""
+        error_type = self._extract_error_type(traceback)
+
+        # Try to extract cell location
+        cell_match = re.search(r'cell[_\s]*(\d+)', traceback.lower())
+        cell_location = int(cell_match.group(1)) if cell_match else None
+
+        return {
+            "error_type": error_type,
+            "cell_location": cell_location
+        }
+
+    def _summarize_notebook(self, notebook: NotebookStructure) -> str:
+        """Create concise notebook summary for LLM."""
+        cell_names = [
+            "imports", "config", "creator", "evaluate",
+            "mate", "mutate", "select", "additional",
+            "init", "register", "evolution", "results"
         ]
 
-        for pattern in patterns:
-            match = re.search(pattern, traceback)
-            if match:
-                cell_num = int(match.group(1))
-                # Convert to 0-indexed
-                return cell_num - 1 if cell_num > 0 else 0
+        summary = []
+        for i, (cell, name) in enumerate(zip(notebook.cells, cell_names)):
+            preview = cell.source[:150].replace('\n', ' ')
+            summary.append(f"Cell {i} ({name}): {preview}...")
 
-        return None
-
-    def _notebook_to_code(self, notebook: NotebookStructure) -> str:
-        """Convert notebook to code with cell markers."""
-        lines = []
-        for i, cell in enumerate(notebook.cells):
-            lines.append(f"### Cell {i} ###")
-            lines.append(cell.source)
-            lines.append("")
-        return "\n".join(lines)
-
-    def _fallback_fix_plan(
-        self,
-        request: FixRequest,
-        error_cell: Optional[int]
-    ) -> FixPlan:
-        """Heuristic-based fallback fix plan."""
-        traceback_lower = request.traceback.lower()
-
-        fixes = []
-        affected_cells = []
-
-        # Common error patterns
-        if "nameerror" in traceback_lower and "individual" in traceback_lower:
-            # Likely using Individual instead of creator.Individual
-            fixes.append(Fix(
-                cell_index=2,
-                fix_description="Fix Individual class definition in creator",
-                fixed_code="""# Create fitness and individual classes
-creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
-creator.create("Individual", list, fitness=creator.FitnessMin)"""
-            ))
-            affected_cells.append(2)
-
-        if "nameerror" in traceback_lower:
-            # Function called before definition
-            if error_cell and error_cell == 9:
-                fixes.append(Fix(
-                    cell_index=9,
-                    fix_description="Ensure toolbox.register uses defined functions",
-                    fixed_code="""# Register operators in toolbox
-toolbox = base.Toolbox()
-toolbox.register('individual', create_individual)
-toolbox.register('population', tools.initRepeat, list, toolbox.individual)
-toolbox.register('evaluate', evaluate)
-toolbox.register('mate', mate)
-toolbox.register('mutate', mutate)
-toolbox.register('select', select)"""
-                ))
-                affected_cells.append(9)
-
-        if "syntaxerror" in traceback_lower and error_cell is not None:
-            fixes.append(Fix(
-                cell_index=error_cell,
-                fix_description=f"Fix syntax error in cell {error_cell}",
-                fixed_code="# Syntax error - needs manual review"
-            ))
-            affected_cells.append(error_cell)
-
-        # Default fix
-        if not fixes:
-            fixes.append(Fix(
-                cell_index=9,
-                fix_description="Regenerate toolbox registration",
-                fixed_code="""# Register operators in toolbox
-toolbox = base.Toolbox()
-toolbox.register('individual', create_individual)
-toolbox.register('population', tools.initRepeat, list, toolbox.individual)
-toolbox.register('evaluate', evaluate)
-toolbox.register('mate', mate)
-toolbox.register('mutate', mutate)
-toolbox.register('select', select)"""
-            ))
-            affected_cells.append(9)
-
-        return FixPlan(
-            error_analysis=ErrorAnalysis(
-                error_type="Unknown",
-                error_location=error_cell,
-                root_cause="Automatic detection failed, applying heuristic fixes",
-                affected_cells=affected_cells
-            ),
-            fixes=fixes,
-            validation_notes="Applied heuristic fixes based on common DEAP errors"
-        )
+        return "\n".join(summary)
 
     def _apply_fixes(self, notebook: NotebookStructure, plan: FixPlan) -> NotebookStructure:
-        """Apply fixes to notebook."""
+        """Apply fixes from plan to notebook."""
         cells = [cell.model_copy(deep=True) for cell in notebook.cells]
 
         for fix in plan.fixes:
             if 0 <= fix.cell_index < 12:
                 cells[fix.cell_index] = NotebookCell(
                     cell_type="code",
+                    cell_name=cells[fix.cell_index].cell_name,
                     source=format_code(fix.fixed_code),
                     execution_count=None
                 )
+                logger.info(f"Fixed cell {fix.cell_index}: {fix.fix_description}")
 
         return NotebookStructure(cells=cells)
 
+    def _fallback_fix(self, request: FixRequest, notebook: NotebookStructure) -> FixPlan:
+        """Heuristic-based fallback fix."""
+        logger.warning("Using fallback heuristic fix")
+
+        error_details = self._extract_error_details(request.traceback)
+        fixes = []
+
+        # Common fix: toolbox.register before function definitions
+        if "NameError" in request.traceback or "not defined" in request.traceback:
+            # Check if cell 9 (register) references undefined functions
+            register_cell = notebook.cells[9]
+            if "toolbox.register" in register_cell.source:
+                # Move function definitions before registration
+                fixes.append(Fix(
+                    cell_index=9,
+                    fix_description="Reordered function registrations",
+                    fixed_code=register_cell.source
+                ))
+
+        # If no specific fixes, return empty plan
+        if not fixes:
+            fixes.append(Fix(
+                cell_index=error_details.get("cell_location", 0),
+                fix_description="Unable to auto-fix, manual intervention needed",
+                fixed_code=notebook.cells[error_details.get("cell_location", 0)].source
+            ))
+
+        return FixPlan(
+            error_analysis=ErrorAnalysis(
+                error_type=error_details.get("error_type", "Unknown"),
+                error_location=error_details.get("cell_location"),
+                root_cause="Fallback analysis",
+                affected_cells=[f.cell_index for f in fixes]
+            ),
+            fixes=fixes,
+            validation_notes="Fallback heuristic fix applied"
+        )
+
+    def _store_fix_pattern_in_mem0(
+        self,
+        request: FixRequest,
+        plan: FixPlan,
+        success: bool
+    ) -> None:
+        """Store fix pattern in Mem0 for future learning."""
+        try:
+            error_type = plan.error_analysis.error_type
+            error_location = plan.error_analysis.error_location or "unknown"
+
+            fix_summary = "; ".join([f.fix_description for f in plan.fixes])
+
+            enhanced_memory.store_error_pattern(
+                user_id=request.user_id,
+                notebook_id=request.notebook_id,
+                error_type=error_type,
+                error_location=str(error_location),
+                fix_applied=fix_summary if success else f"Failed: {fix_summary}"
+            )
+
+            # Store in notebook context
+            enhanced_memory.add_notebook_context(
+                user_id=request.user_id,
+                notebook_id=request.notebook_id,
+                operation="fix",
+                details={
+                    "error_type": error_type,
+                    "success": success,
+                    "fixes_applied": [f.fix_description for f in plan.fixes],
+                    "affected_cells": plan.error_analysis.affected_cells
+                }
+            )
+
+        except Exception as e:
+            logger.error(f"Error storing fix pattern in Mem0: {e}")
+
 
 class NotebookValidator:
-    """Validates notebook structure and code."""
+    """Validates notebook structure and content."""
 
     @staticmethod
     def validate(notebook: NotebookStructure) -> tuple[bool, List[str]]:
-        """Comprehensive validation of notebook."""
+        """Validate notebook structure and return errors."""
         return validate_notebook_structure(notebook)
-
-    @staticmethod
-    def quick_check(notebook: NotebookStructure) -> bool:
-        """Quick structural check."""
-        if len(notebook.cells) != 12:
-            return False
-
-        # Check critical cells have content
-        critical_cells = [0, 2, 3, 9, 10]  # imports, creator, evaluate, toolbox, evolution
-        for idx in critical_cells:
-            if not notebook.cells[idx].source.strip():
-                return False
-
-        return True

@@ -72,7 +72,6 @@ class CellNameMapper:
 
 
 # Dependency mapping: which cells depend on which other cells
-# BETA (yet to test)
 CELL_DEPENDENCIES = {
     "toolbox_registration": ["evaluate", "crossover", "mutation", "selection", "initialization"],
     "evolution_loop": ["toolbox_registration", "config"],
