@@ -1,4 +1,4 @@
-"""Modifier agent - Modifies existing notebooks via natural language with Mem0 integration."""
+"""modifier agent - modifies existing notebooks via natural language with mem0 integration."""
 
 import instructor
 from groq import Groq
@@ -8,27 +8,28 @@ from app.config import settings
 from app.models import ModifyRequest, NotebookStructure, NotebookCell
 from app.memory import enhanced_memory
 from app.utils import format_code
+from app.prompts.modifier import get_affected_cells_analysis_prompt, get_cell_modification_prompt
 import logging
 
 logger = logging.getLogger(__name__)
 
 
 class AffectedCellsAnalysis(BaseModel):
-    """LLM analysis of which cells are affected by a modification."""
+    """llm analysis of which cells are affected by a modification."""
     target_cell_index: int = Field(description="Primary cell to modify")
     affected_cells: List[int] = Field(description="Additional cells that need updates")
     reasoning: str = Field(description="Why these cells are affected")
 
 
 class CellModification(BaseModel):
-    """Single cell modification."""
+    """single cell modification."""
     cell_index: int
     new_code: str
     change_description: str
 
 
 class ModificationResult(BaseModel):
-    """Result of cell modification."""
+    """result of cell modification."""
     modifications: List[CellModification]
     changes_summary: List[str]
     requirements: Optional[str] = Field(None, description="Updated newline-separated requirements (if changed)")
@@ -36,13 +37,13 @@ class ModificationResult(BaseModel):
 
 class NotebookModifier:
     """
-    Modifies existing DEAP notebooks using 3-case architecture:
-    1. Targeted cell modification (when cell_name provided)
-    2. Notebook-level modification (no cell_name)
-    3. Error fixing is handled by fixer.py
+    modifies existing deap notebooks using 3-case architecture:
+    1. targeted cell modification (when cell_name provided)
+    2. notebook-level modification (no cell_name)
+    3. error fixing is handled by fixer.py
     """
 
-    # Map cell names to indices
+    # map cell names to indices
     CELL_MAP = {
         "imports": 0,
         "import": 0,
@@ -83,58 +84,58 @@ class NotebookModifier:
         request: ModifyRequest
     ) -> tuple[NotebookStructure, List[str], List[int]]:
         """
-        Modify notebook based on request type.
+        modify notebook based on request type.
 
-        Returns:
-            - Modified notebook
-            - List of change descriptions
-            - List of modified cell indices
+        returns:
+            - modified notebook
+            - list of change descriptions
+            - list of modified cell indices
         """
-        logger.info(f"Modifying notebook {request.notebook_id} for user {request.user_id}")
-        logger.info(f"Instruction: {request.instruction}")
-        logger.info(f"Cell name: {request.cell_name}")
+        logger.info(f"modifying notebook {request.notebook_id} for user {request.user_id}")
+        logger.info(f"instruction: {request.instruction}")
+        logger.info(f"cell name: {request.cell_name}")
 
         if request.cell_name:
-            # Case 1: Targeted cell modification
+            #  targeted cell modification
             return self._targeted_modification(request)
         else:
-            # Case 2: Notebook-level modification
+            #  notebook-level modification
             return self._notebook_level_modification(request)
 
-    # targetted modification
+    # targeted modification
 
     def _targeted_modification(
         self,
         request: ModifyRequest
     ) -> tuple[NotebookStructure, List[str], List[int]]:
         """
-        Modify a specific cell with minimal context.
+        modify a specific cell with minimal context.
 
-        Steps:
-        1. Get target cell index from cell_name
-        2. Query Mem0 for user preferences and learned dependencies
-        3. LLM determines affected cells (dynamic dependency analysis)
-        4. Fetch only required cells
-        5. LLM modifies those cells
-        6. Store patterns in Mem0
+        steps:
+        1. get target cell index from cell_name
+        2. query mem0 for user preferences and learned dependencies
+        3. llm determines affected cells (dynamic dependency analysis)
+        4. fetch only required cells
+        5. llm modifies those cells
+        6. store patterns in mem0
         """
-        logger.info(f"Targeted modification for cell: {request.cell_name}")
+        logger.info(f"targeted modification for cell: {request.cell_name}")
 
-        #  Get target cell index
+        #  get target cell index
         target_index = self._get_cell_index(request.cell_name)
         if target_index is None:
-            logger.error(f"Invalid cell name: {request.cell_name}")
-            # Fallback to notebook-level
+            logger.error(f"invalid cell name: {request.cell_name}")
+            # fallback to notebook-level
             return self._notebook_level_modification(request)
 
-        #  Get Mem0 context
+        #  get mem0 context
         mem0_context = self._get_mem0_context_for_cell(
             request.user_id,
             request.notebook_id,
             request.cell_name
         )
 
-        #  LLM determines affected cells
+        #  llm determines affected cells
         affected_analysis = self._analyze_affected_cells(
             request,
             target_index,
@@ -142,9 +143,9 @@ class NotebookModifier:
         )
 
         all_cell_indices = sorted(set([affected_analysis.target_cell_index] + affected_analysis.affected_cells))
-        logger.info(f"Cells to modify: {all_cell_indices}")
+        logger.info(f"cells to modify: {all_cell_indices}")
 
-        #  Get cells for modification
+        #  get cells for modification
         cells_for_llm = [
             {
                 "index": i,
@@ -154,7 +155,7 @@ class NotebookModifier:
             for i in all_cell_indices
         ]
 
-        #  Modify cells with LLM
+        #  modify cells with llm
         modification_result = self._modify_cells_with_llm(
             cells_for_llm,
             request.instruction,
@@ -162,7 +163,7 @@ class NotebookModifier:
             target_cell_name=request.cell_name
         )
 
-        #  Apply modifications to notebook
+        #  apply modifications to notebook
         modified_notebook = self._apply_cell_modifications(
             request.notebook,
             modification_result.modifications
@@ -171,7 +172,7 @@ class NotebookModifier:
         if modification_result.requirements:
             modified_notebook.requirements = modification_result.requirements
 
-        #  Store in Mem0
+        #  store in mem0
         self._store_targeted_modification_in_mem0(
             request,
             target_index,
@@ -182,7 +183,7 @@ class NotebookModifier:
         return modified_notebook, modification_result.changes_summary, all_cell_indices
 
     def _get_cell_index(self, cell_name: str) -> Optional[int]:
-        """Convert cell name to index."""
+        """convert cell name to index."""
         normalized = cell_name.lower().strip()
         return self.CELL_MAP.get(normalized)
 
@@ -192,7 +193,7 @@ class NotebookModifier:
         notebook_id: str,
         cell_name: str
     ) -> Dict[str, Any]:
-        """Get relevant Mem0 context for cell modification."""
+        """get relevant mem0 context for cell modification."""
         context = {
             "user_preferences": [],
             "cell_patterns": [],
@@ -201,7 +202,7 @@ class NotebookModifier:
         }
 
         try:
-            # User preferences for this cell type
+            # user preferences for this cell type
             prefs = enhanced_memory.search_user_context(
                 user_id=user_id,
                 query=f"preferences for {cell_name}",
@@ -209,7 +210,7 @@ class NotebookModifier:
             )
             context["user_preferences"] = [p.get("memory", p.get("content", "")) for p in prefs]
 
-            # Past modifications to this cell type
+            # past modifications to this cell type
             patterns = enhanced_memory.get_cell_patterns(
                 user_id=user_id,
                 cell_name=cell_name,
@@ -217,14 +218,14 @@ class NotebookModifier:
             )
             context["cell_patterns"] = [p.get("memory", p.get("content", "")) for p in patterns]
 
-            # Learned dependencies
+            # learned dependencies
             deps = enhanced_memory.get_learned_dependencies(
                 user_id=user_id,
                 cell_name=cell_name
             )
             context["learned_dependencies"] = deps
 
-            # Notebook history
+            # notebook history
             history = enhanced_memory.get_notebook_history(
                 user_id=user_id,
                 notebook_id=notebook_id,
@@ -233,7 +234,7 @@ class NotebookModifier:
             context["notebook_history"] = [h.get("memory", h.get("content", "")) for h in history]
 
         except Exception as e:
-            logger.error(f"Error getting Mem0 context: {e}")
+            logger.error(f"error getting mem0 context: {e}")
 
         return context
 
@@ -243,36 +244,19 @@ class NotebookModifier:
         target_index: int,
         mem0_context: Dict[str, Any]
     ) -> AffectedCellsAnalysis:
-        """Use LLM to determine which cells are affected."""
+        """use llm to determine which cells are affected."""
         target_cell = request.notebook.cells[target_index]
 
-        # Build context string
+        # build context string
         context_str = self._format_mem0_context(mem0_context)
 
-        prompt = f"""Analyze which cells in a DEAP notebook will be affected by this modification.
-
-Target cell (index {target_index}):
-Name: {target_cell.cell_name}
-Current code:
-{target_cell.source}
-
-Modification instruction: {request.instruction}
-
-{context_str}
-
-12-cell structure:
-0: imports, 1: config, 2: creator, 3: evaluate, 4: mate, 5: mutate,
-6: select, 7: additional, 8: init, 9: toolbox.register, 10: evolution, 11: results
-
-Determine:
-1. Is this a code change (affects dependencies) or just cosmetic (logs, comments)?
-2. Which other cells need updates?
-
-Examples:
-- "Add logging to mutate" → Only cell 5 (no dependencies)
-- "Change mutation to polynomial" → Cells 5 and 9 (registration needs update)
-- "Use bounds from config in mutation" → Cells 1, 5, 9 (config, mutate, register)
-"""
+        prompt = get_affected_cells_analysis_prompt(
+            target_index=target_index,
+            target_cell_name=target_cell.cell_name,
+            target_cell_source=target_cell.source,
+            instruction=request.instruction,
+            context_str=context_str
+        )
 
         try:
             analysis = self.client.chat.completions.create(
@@ -284,8 +268,8 @@ Examples:
             )
             return analysis
         except Exception as e:
-            logger.error(f"Failed to analyze affected cells: {e}")
-            # Fallback: assume only target cell
+            logger.error(f"failed to analyze affected cells: {e}")
+            # fallback: assume only target cell
             return AffectedCellsAnalysis(
                 target_cell_index=target_index,
                 affected_cells=[],
@@ -299,7 +283,7 @@ Examples:
         mem0_context: Dict[str, Any],
         target_cell_name: Optional[str] = None
     ) -> ModificationResult:
-        """Use LLM to modify cells."""
+        """use llm to modify cells."""
         context_str = self._format_mem0_context(mem0_context)
 
         cells_str = "\n\n".join([
@@ -307,19 +291,11 @@ Examples:
             for c in cells
         ])
 
-        prompt = f"""Modify DEAP notebook cells based on instruction.
-
-Current cells:
-{cells_str}
-
-Instruction: {instruction}
-
-{context_str}
-
-Return the modified code for each cell that needs changes.
-Preserve the DEAP 12-cell structure and functional programming style.
-If the modification requires new packages, provide the full updated list of requirements. Dont just give the newly added modules. Give the entire list of modules requried for the entire notebook
-"""
+        prompt = get_cell_modification_prompt(
+            cells_str=cells_str,
+            instruction=instruction,
+            context_str=context_str
+        )
 
         try:
             result = self.client.chat.completions.create(
@@ -331,8 +307,8 @@ If the modification requires new packages, provide the full updated list of requ
             )
             return result
         except Exception as e:
-            logger.error(f"Failed to modify cells with LLM: {e}")
-            # Fallback: return empty modifications
+            logger.error(f"failed to modify cells with llm: {e}")
+            # fallback: return empty modifications
             return ModificationResult(
                 modifications=[],
                 changes_summary=[f"Error: {str(e)}"]
@@ -345,19 +321,19 @@ If the modification requires new packages, provide the full updated list of requ
         request: ModifyRequest
     ) -> tuple[NotebookStructure, List[str], List[int]]:
         """
-        Modify entire notebook for generic/complex changes.
+        modify entire notebook for generic/complex changes.
 
-        Uses full notebook context + Mem0 for holistic modifications.
+        uses full notebook context + mem0 for holistic modifications.
         """
-        logger.info("Notebook-level modification (full context)")
+        logger.info("notebook-level modification (full context)")
 
-        # Get Mem0 context
+        # get mem0 context
         mem0_context = self._get_mem0_context_for_notebook(
             request.user_id,
             request.notebook_id
         )
 
-        # Build full notebook context
+        # build full notebook context
         all_cells = [
             {
                 "index": i,
@@ -367,7 +343,7 @@ If the modification requires new packages, provide the full updated list of requ
             for i, cell in enumerate(request.notebook.cells)
         ]
 
-        # Modify with full context
+        # modify with full context
         modification_result = self._modify_cells_with_llm(
             all_cells,
             request.instruction,
@@ -375,7 +351,7 @@ If the modification requires new packages, provide the full updated list of requ
             target_cell_name=None
         )
 
-        # Apply modifications
+        # apply modifications
         modified_notebook = self._apply_cell_modifications(
             request.notebook,
             modification_result.modifications
@@ -384,10 +360,10 @@ If the modification requires new packages, provide the full updated list of requ
         if modification_result.requirements:
             modified_notebook.requirements = modification_result.requirements
 
-        # Extract modified cell indices
+        # extract modified cell indices
         modified_indices = [m.cell_index for m in modification_result.modifications]
 
-        # Store in Mem0
+        # store in mem0
         self._store_notebook_modification_in_mem0(
             request,
             modified_indices,
@@ -401,7 +377,7 @@ If the modification requires new packages, provide the full updated list of requ
         user_id: str,
         notebook_id: str
     ) -> Dict[str, Any]:
-        """Get Mem0 context for notebook-level modifications."""
+        """get mem0 context for notebook-level modifications."""
         context = {
             "user_preferences": [],
             "notebook_history": [],
@@ -409,7 +385,7 @@ If the modification requires new packages, provide the full updated list of requ
         }
 
         try:
-            # Overall user preferences
+            # overall user preferences
             prefs = enhanced_memory.search_user_context(
                 user_id=user_id,
                 query="optimization preferences and patterns",
@@ -417,7 +393,7 @@ If the modification requires new packages, provide the full updated list of requ
             )
             context["user_preferences"] = [p.get("memory", p.get("content", "")) for p in prefs]
 
-            # Notebook history
+            # notebook history
             history = enhanced_memory.get_notebook_history(
                 user_id=user_id,
                 notebook_id=notebook_id,
@@ -426,14 +402,14 @@ If the modification requires new packages, provide the full updated list of requ
             context["notebook_history"] = [h.get("memory", h.get("content", "")) for h in history]
 
         except Exception as e:
-            logger.error(f"Error getting notebook Mem0 context: {e}")
+            logger.error(f"error getting notebook mem0 context: {e}")
 
         return context
 
     # helpers
 
     def _format_mem0_context(self, context: Dict[str, Any]) -> str:
-        """Format Mem0 context for LLM prompt."""
+        """format mem0 context for llm prompt."""
         parts = []
 
         if context.get("user_preferences"):
@@ -456,7 +432,7 @@ If the modification requires new packages, provide the full updated list of requ
         notebook: NotebookStructure,
         modifications: List[CellModification]
     ) -> NotebookStructure:
-        """Apply LLM modifications to notebook."""
+        """apply llm modifications to notebook."""
         cells = [cell.model_copy(deep=True) for cell in notebook.cells]
 
         for mod in modifications:
@@ -467,7 +443,7 @@ If the modification requires new packages, provide the full updated list of requ
                     source=format_code(mod.new_code),
                     execution_count=None
                 )
-                logger.info(f"Modified cell {mod.cell_index}: {mod.change_description}")
+                logger.info(f"modified cell {mod.cell_index}: {mod.change_description}")
 
         return NotebookStructure(cells=cells)
 
@@ -478,9 +454,9 @@ If the modification requires new packages, provide the full updated list of requ
         all_indices: List[int],
         result: ModificationResult
     ) -> None:
-        """Store targeted modification in Mem0."""
+        """store targeted modification in mem0."""
         try:
-            # Store cell modification
+            # store cell modification
             enhanced_memory.store_cell_modification(
                 user_id=request.user_id,
                 notebook_id=request.notebook_id,
@@ -492,7 +468,7 @@ If the modification requires new packages, provide the full updated list of requ
                 }
             )
 
-            # Store dependency pattern if cascading changes occurred
+            # store dependency pattern if cascading changes occurred
             if len(all_indices) > 1:
                 affected = [request.notebook.cells[i].cell_name or f"cell_{i}" for i in all_indices if i != target_index]
                 enhanced_memory.store_dependency_pattern(
@@ -503,7 +479,7 @@ If the modification requires new packages, provide the full updated list of requ
                     reason=f"Modification: {request.instruction}"
                 )
 
-            # Store notebook context
+            # store notebook context
             enhanced_memory.add_notebook_context(
                 user_id=request.user_id,
                 notebook_id=request.notebook_id,
@@ -517,7 +493,7 @@ If the modification requires new packages, provide the full updated list of requ
             )
 
         except Exception as e:
-            logger.error(f"Error storing in Mem0: {e}")
+            logger.error(f"error storing in mem0: {e}")
 
     def _store_notebook_modification_in_mem0(
         self,
@@ -525,7 +501,7 @@ If the modification requires new packages, provide the full updated list of requ
         modified_indices: List[int],
         result: ModificationResult
     ) -> None:
-        """Store notebook-level modification in Mem0."""
+        """store notebook-level modification in mem0."""
         try:
             enhanced_memory.add_notebook_context(
                 user_id=request.user_id,
@@ -538,4 +514,4 @@ If the modification requires new packages, provide the full updated list of requ
                 }
             )
         except Exception as e:
-            logger.error(f"Error storing in Mem0: {e}")
+            logger.error(f"error storing in mem0: {e}")
