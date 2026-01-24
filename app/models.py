@@ -70,6 +70,7 @@ class NotebookStructure(BaseModel):
     """Complete 12-cell notebook structure."""
     cells: List[NotebookCell] = Field(..., min_length=12, max_length=12)
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    requirements: str = Field(default="", description="Newline-separated requirements for the code")
 
 
 class GenerateRequest(BaseModel):
@@ -151,6 +152,7 @@ class GenerateResponse(BaseModel):
     """Response from generate endpoint."""
     notebook_id: str = Field(..., description="Notebook ID (same as request)")
     notebook: NotebookStructure
+    requirements: str = Field(description="Newline-separated requirements for the code")
     message: str = "Notebook generated successfully"
 
 
@@ -160,6 +162,7 @@ class ModifyResponse(BaseModel):
     notebook: NotebookStructure
     changes_made: List[str] = Field(description="List of changes applied")
     cells_modified: List[int] = Field(description="Indices of modified cells")
+    requirements: str = Field(description="Newline-separated requirements for the code")
     message: str = "Notebook modified successfully"
 
 
@@ -169,6 +172,7 @@ class FixResponse(BaseModel):
     notebook: NotebookStructure
     fixes_applied: List[str] = Field(description="List of fixes applied")
     validation_passed: bool
+    requirements: str = Field(description="Newline-separated requirements for the code")
     message: str = "Notebook fixed successfully"
 
 

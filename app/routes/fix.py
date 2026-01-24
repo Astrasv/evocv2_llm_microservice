@@ -6,6 +6,7 @@ import logging
 from app.models import FixRequest, FixResponse
 from app.graph import workflow, WorkflowState
 
+
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1", tags=["fix"])
 
@@ -48,7 +49,7 @@ async def fix_notebook(request: FixRequest):
         notebook = final_state.get("notebook") or request.notebook
         fixes = final_state.get("changes_made", [])
         validation_passed = final_state.get("validation_passed", False)
-
+        
         message = "Notebook fixed successfully" if validation_passed else "Fixes applied but validation incomplete"
 
         logger.info(f"Fix completed for notebook {request.notebook_id}: {message}")
@@ -58,6 +59,7 @@ async def fix_notebook(request: FixRequest):
             notebook=notebook,
             fixes_applied=fixes,
             validation_passed=validation_passed,
+            requirements=notebook.requirements,
             message=message
         )
 

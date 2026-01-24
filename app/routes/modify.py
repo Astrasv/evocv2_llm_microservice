@@ -6,6 +6,7 @@ import logging
 from app.models import ModifyRequest, ModifyResponse
 from app.graph import workflow, WorkflowState
 
+
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1", tags=["modify"])
 
@@ -58,15 +59,15 @@ async def modify_notebook(request: ModifyRequest):
         notebook = final_state["notebook"]
         changes = final_state.get("changes_made", [])
         cells_modified = final_state.get("cells_modified", [])
-
+        
         logger.info(f"Successfully modified notebook {request.notebook_id}")
-        logger.info(f"Modified cells: {cells_modified}")
 
         return ModifyResponse(
             notebook_id=request.notebook_id,
             notebook=notebook,
             changes_made=changes,
             cells_modified=cells_modified,
+            requirements=notebook.requirements,
             message="Notebook modified successfully"
         )
 

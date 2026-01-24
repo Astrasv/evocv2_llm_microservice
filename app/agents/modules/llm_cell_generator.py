@@ -27,6 +27,7 @@ class SingleCellCode(BaseModel):
 class CompleteNotebookGeneration(BaseModel):
     """Complete notebook with all 12 cells generated in a single pass."""
     cells: list[SingleCellCode] = Field(..., min_length=12, max_length=12, description="All 12 cells in order")
+    requirements: str = Field(..., description="Newline-separated packages needed for the code (e.g., 'numpy\ndeap\nmatplotlib')")
 
 
 class LLMCellGenerator:
@@ -387,8 +388,9 @@ Cell 11 (results_and_plots): Display results, print statistics, create plots if 
 3. Each cell should reference previous cells' definitions (no redefinitions)
 4. Code must be consistent across all cells
 5. All cells together form a complete, executable notebook
+6. Generate a list of requirements (pip packages) needed to run this code
 
-Generate the complete notebook as a JSON array of 12 cells."""
+Generate the complete notebook as a JSON object with 'cells' array and 'requirements' string."""
 
         return prompt
 

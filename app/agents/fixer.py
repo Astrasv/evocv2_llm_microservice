@@ -34,6 +34,7 @@ class FixPlan(BaseModel):
     error_analysis: ErrorAnalysis
     fixes: List[Fix]
     validation_notes: str = Field(description="Notes about the fixes")
+    requirements: Optional[str] = Field(None, description="Updated newline-separated requirements (if changed)")
 
 
 class NotebookFixer:
@@ -137,6 +138,7 @@ Common DEAP notebook errors:
 
 Analyze the error and provide a fix plan.
 Return structured fixes for the affected cells.
+If the fix requires new packages, provide the full updated list of requirements.
 """
 
         try:
@@ -248,7 +250,10 @@ Return structured fixes for the affected cells.
                 )
                 logger.info(f"Fixed cell {fix.cell_index}: {fix.fix_description}")
 
-        return NotebookStructure(cells=cells)
+        # Update requirements if provided in plan, otherwise keep existing
+        requirements = plan.requirements if plan.requirements is not None else notebook.requirements
+
+        return NotebookStructure(cells=cells, requirements=requirements)
 
     def _fallback_fix(self, request: FixRequest, notebook: NotebookStructure) -> FixPlan:
         """Heuristic-based fallback fix."""

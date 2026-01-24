@@ -64,6 +64,7 @@ def test_flexible_json_request():
 
     print(f"\n✓ Notebook generated successfully")
     print(f"  Total cells: {len(notebook.cells)}")
+    print(f"  Requirements:\n{notebook.requirements}")
 
     # Display cell names
     print("\n  Cell structure:")

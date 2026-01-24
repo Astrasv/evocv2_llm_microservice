@@ -6,6 +6,7 @@ import logging
 from app.models import GenerateRequest, GenerateResponse
 from app.graph import workflow, WorkflowState
 
+
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1", tags=["generate"])
 
@@ -44,12 +45,13 @@ async def generate_notebook(request: GenerateRequest):
             )
 
         notebook = final_state["notebook"]
-
+        
         logger.info(f"Successfully generated notebook {request.notebook_id} for user {request.user_id}")
 
         return GenerateResponse(
             notebook_id=request.notebook_id,
             notebook=notebook,
+            requirements=notebook.requirements,
             message="Notebook generated successfully"
         )
 

@@ -50,7 +50,10 @@ class NotebookGenerator:
             cells.append(cell)
             logger.info(f"Processed cell {cell_index}: {cell_data.cell_name}")
 
-        notebook = NotebookStructure(cells=cells)
+        notebook = NotebookStructure(
+            cells=cells,
+            requirements=complete_notebook.requirements
+        )
 
         # Store generation in Mem0
         self._store_generation_in_mem0(request, problem_data)

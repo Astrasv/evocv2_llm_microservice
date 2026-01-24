@@ -13,8 +13,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-# ==================== LLM Response Models ====================
-
 class AffectedCellsAnalysis(BaseModel):
     """LLM analysis of which cells are affected by a modification."""
     target_cell_index: int = Field(description="Primary cell to modify")
@@ -33,9 +31,8 @@ class ModificationResult(BaseModel):
     """Result of cell modification."""
     modifications: List[CellModification]
     changes_summary: List[str]
+    requirements: Optional[str] = Field(None, description="Updated newline-separated requirements (if changed)")
 
-
-# ==================== Main Modifier Class ====================
 
 class NotebookModifier:
     """
@@ -104,7 +101,7 @@ class NotebookModifier:
             # Case 2: Notebook-level modification
             return self._notebook_level_modification(request)
 
-    # ==================== Case 1: Targeted Cell Modification ====================
+    # targetted modification
 
     def _targeted_modification(
         self,
@@ -123,21 +120,21 @@ class NotebookModifier:
         """
         logger.info(f"Targeted modification for cell: {request.cell_name}")
 
-        # Step 1: Get target cell index
+        #  Get target cell index
         target_index = self._get_cell_index(request.cell_name)
         if target_index is None:
             logger.error(f"Invalid cell name: {request.cell_name}")
             # Fallback to notebook-level
             return self._notebook_level_modification(request)
 
-        # Step 2: Get Mem0 context
+        #  Get Mem0 context
         mem0_context = self._get_mem0_context_for_cell(
             request.user_id,
             request.notebook_id,
             request.cell_name
         )
 
-        # Step 3: LLM determines affected cells
+        #  LLM determines affected cells
         affected_analysis = self._analyze_affected_cells(
             request,
             target_index,
@@ -147,7 +144,7 @@ class NotebookModifier:
         all_cell_indices = sorted(set([affected_analysis.target_cell_index] + affected_analysis.affected_cells))
         logger.info(f"Cells to modify: {all_cell_indices}")
 
-        # Step 4: Get cells for modification
+        #  Get cells for modification
         cells_for_llm = [
             {
                 "index": i,
@@ -157,7 +154,7 @@ class NotebookModifier:
             for i in all_cell_indices
         ]
 
-        # Step 5: Modify cells with LLM
+        #  Modify cells with LLM
         modification_result = self._modify_cells_with_llm(
             cells_for_llm,
             request.instruction,
@@ -165,13 +162,16 @@ class NotebookModifier:
             target_cell_name=request.cell_name
         )
 
-        # Step 6: Apply modifications to notebook
+        #  Apply modifications to notebook
         modified_notebook = self._apply_cell_modifications(
             request.notebook,
             modification_result.modifications
         )
+        
+        if modification_result.requirements:
+            modified_notebook.requirements = modification_result.requirements
 
-        # Step 7: Store in Mem0
+        #  Store in Mem0
         self._store_targeted_modification_in_mem0(
             request,
             target_index,
@@ -318,6 +318,7 @@ Instruction: {instruction}
 
 Return the modified code for each cell that needs changes.
 Preserve the DEAP 12-cell structure and functional programming style.
+If the modification requires new packages, provide the full updated list of requirements. Dont just give the newly added modules. Give the entire list of modules requried for the entire notebook
 """
 
         try:
@@ -337,7 +338,7 @@ Preserve the DEAP 12-cell structure and functional programming style.
                 changes_summary=[f"Error: {str(e)}"]
             )
 
-    # ==================== Case 2: Notebook-Level Modification ====================
+    #  notebook-level modification
 
     def _notebook_level_modification(
         self,
@@ -379,6 +380,9 @@ Preserve the DEAP 12-cell structure and functional programming style.
             request.notebook,
             modification_result.modifications
         )
+        
+        if modification_result.requirements:
+            modified_notebook.requirements = modification_result.requirements
 
         # Extract modified cell indices
         modified_indices = [m.cell_index for m in modification_result.modifications]
@@ -426,7 +430,7 @@ Preserve the DEAP 12-cell structure and functional programming style.
 
         return context
 
-    # ==================== Helper Methods ====================
+    # helpers
 
     def _format_mem0_context(self, context: Dict[str, Any]) -> str:
         """Format Mem0 context for LLM prompt."""
