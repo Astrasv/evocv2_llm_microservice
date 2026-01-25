@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     mem0_project_id: Optional[str] = None
 
     host: str = "0.0.0.0"
-    port: int = 8000
+    port: int = 5000
     log_level: str = "info"
 
     class Config:
