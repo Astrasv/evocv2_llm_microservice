@@ -39,6 +39,8 @@ def get_complete_notebook_prompt(problem_data: Dict[str, Any]) -> str:
 {other_specs_text}
 
 **12-Cell Structure:**
+NOTE: You must use the following variable in Cell 1 (config) with the exact same variable name case sensitive
+USER_ID, NOTEBOOK_ID, POP_SIZE (population size), CX_PROB (crossover probability), MUT_PROB (mutation probability)
 
 Cell 0 (imports): Import ALL required libraries (deap, numpy, random, matplotlib if needed)
 Cell 1 (config): Define configuration constants (DIMENSIONS, LOWER_BOUND, UPPER_BOUND, seeds)
